@@ -5,18 +5,31 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader, PdfWriter
 from io import BytesIO
 from reportlab.lib.pagesizes import letter, landscape, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Preformatted, Image, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
 from reportlab.lib import colors
 import pandas as pd
 import matplotlib.pyplot as plt
-import ast
-from collections import Counter
 import json
 import matplotlib.pyplot as plt
 from tempfile import TemporaryDirectory
 import re
+from reportlab.lib.enums import TA_LEFT
 
+extra_feature_selection=False
+
+def to_cammel_case(s):
+    s = s.strip()
+    if not s:
+        return ''
+    
+    # If first character is already uppercase, return as-is
+    if s[0].isupper():
+        return s
+
+    # Otherwise, convert to PascalCase
+    words = s.split()
+    return ''.join(word.capitalize() for word in words)
 
 
 
@@ -78,6 +91,7 @@ def convert_svg_to_png(svg_path, png_path):
 
 
 def GraphCreator(output_folder,dictionary):
+    output_folder="ReportData/"+output_folder
     os.makedirs(output_folder, exist_ok=True)
 
     for key, file_path in dictionary.items():
@@ -102,28 +116,63 @@ def GraphCreator(output_folder,dictionary):
             convert_svg_to_png(svg_output, png_output)
 
 
+def add_title_overlay(page, title_text):
+    width = float(page.mediabox.width)
+    height = float(page.mediabox.height)
+
+    # Clean and format title
+    cleaned_title = title_text.strip().replace("_", " ")
+
+    packet = BytesIO()
+    c = canvas.Canvas(packet, pagesize=(width, height))
+    c.setFont("Helvetica-Bold", 24)
+    c.setFillColorRGB(0, 0, 0)
+
+    # Measure text width and calculate centered x
+    text_width = c.stringWidth(cleaned_title, "Helvetica-Bold", 24)
+    x = (width - text_width) / 2
+    y = height - 36  # Adjust vertical position if needed
+
+    c.drawString(x, y, cleaned_title)
+    c.save()
+    packet.seek(0)
+
+    overlay_reader = PdfReader(packet)
+    overlay_page = overlay_reader.pages[0]
+    page.merge_page(overlay_page)
+    return page
+
+
 def PDFCreator2(folder, output_pdf):
     # Temporary in-memory PDF to hold new pages
+    first=True
     packet = BytesIO()
     c = canvas.Canvas(packet, pagesize=letter)
     width, height = letter
+
+    title = folder
+
+    folder="ReportData/"+folder
 
     # Sort images (you can add your logic to define sections here)
     images = [f for f in os.listdir(folder) if f.lower().endswith(".png")]
     images.sort()
 
-    title = folder
-    c.setFont("Helvetica-Bold", 24)
-    c.drawCentredString(width / 2, height - 30, title)
+    
 
     if images:
+        if first==True:
+            c.setFont("Helvetica-Bold", 24)
+            c.drawCentredString(width / 2, height - 30, title)
+            first=False
+
         for img_file in images:
             img_path = os.path.join(folder, img_file)
 
             # Draw a title based on the file name (without extension)
-            title = os.path.splitext(img_file)[0].split("__")[0].replace("_", " ").title()
+            title = os.path.splitext(img_file)[0].split("__")[0].replace("_", " ")
             c.setFont("Helvetica-Bold", 16)
-            c.drawCentredString(width / 2,height - 50, title)#height - 50,
+            c.drawCentredString(width*0.2, height-130, to_cammel_case(title))
 
             # Draw the image
             c.drawImage(img_path, 0, 0, width=width, height=height, preserveAspectRatio=True, anchor='c')
@@ -173,16 +222,28 @@ def PDFCreator2(folder, output_pdf):
                 for page in reader.pages:
                     writer.add_page(page)
 
+        first_pdf = True
+        if first==False:
+            first_pdf=False
+
         # Add pages from other PDFs in the folder
         for pdf_file in pdfs:
             full_path = os.path.join(folder, pdf_file)
             if os.path.abspath(full_path) == os.path.abspath(output_pdf):
-                continue  # skip Report.pdf itself to avoid infinite loop
+                continue  # skip Report.pdf itself
 
             print(f"Adding {pdf_file}")
             reader = PdfReader(full_path)
-            for page in reader.pages:
+
+            for i, page in enumerate(reader.pages):
+                # Add title overlay only on the first page of the first PDF
+                if first_pdf and i == 0:
+                    print(f"Adding title to {pdf_file}'s first page")
+                    page = add_title_overlay(page, title)
+
                 writer.add_page(page)
+
+            first_pdf = False  # Only first PDF gets title on first page
 
         # Save to output PDF
         with open(output_pdf, "wb") as f_out:
@@ -195,12 +256,12 @@ def PDFCreator2(folder, output_pdf):
 
 
 def csv_to_pdf_table(folder, dictionary):
+    folder="ReportData/"+folder
     styles = getSampleStyleSheet()
     styleN = styles["BodyText"]
     styleN.fontSize = 7
     styleN.leading = 9
 
-    title_style = styles["Title"]
     subtitle_style = styles["Heading2"]
 
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
@@ -238,14 +299,12 @@ def csv_to_pdf_table(folder, dictionary):
                 base_name = os.path.basename(output_pdf)
                 output_path = os.path.join(folder, base_name)
 
-                # Titles
-                folder_title = os.path.basename(folder).title()
-                file_title = os.path.splitext(base_name)[0].split("__")[0].replace("_", " ").title()
-                title_para = Paragraph(folder_title, title_style)
-                subtitle_para = Paragraph(file_title, subtitle_style)
+                # Title
+                file_title = os.path.splitext(base_name)[0].split("__")[0].replace("_", " ")
+                subtitle_para = Paragraph(to_cammel_case(file_title), subtitle_style)
 
                 # Assemble PDF content
-                elements = [title_para, Spacer(1, 6), subtitle_para, Spacer(1, 12), table]
+                elements = [ Spacer(1, 6), subtitle_para, Spacer(1, 12), table]
 
                 # Build PDF
                 doc = SimpleDocTemplate(
@@ -261,8 +320,6 @@ def csv_to_pdf_table(folder, dictionary):
                 print(f"Failed to process {csv_file}: {badFile}")
                 if is_bad_csv(csv_file):
                     bad_csv_to_pdf(folder, {output_pdf: csv_file})
-                else:
-                    GraphCreator(folder, {output_pdf: csv_file})
 
 
 def bad_csv_to_pdf(folder,dictionary):
@@ -271,23 +328,18 @@ def bad_csv_to_pdf(folder,dictionary):
     styleN.fontSize = 7
     styleN.leading = 9
 
-    title_style = styles["Title"]
     subtitle_style = styles["Heading2"]
 
-    # Create title and paragraph
-    pdf_title = Paragraph(folder, title_style)
+    spacer = Spacer(1, 12) 
 
-    # Optional spacer for some vertical space
-    spacer = Spacer(1, 12)  # (width, height) — height is 12 points here
-
-    elements=[pdf_title,spacer]
+    elements=[spacer]
 
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
 
 
     for output_pdf, csv_file in dictionary.items():
 
-        table_para_title = Paragraph(output_pdf.split("__")[0], subtitle_style)
+        table_para_title = Paragraph(to_cammel_case(output_pdf.split("__")[0]), subtitle_style)
         elements.append(table_para_title)
 
         count=0
@@ -338,14 +390,6 @@ def bad_csv_to_pdf(folder,dictionary):
         doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
         styles = getSampleStyleSheet()
         styleN = styles["Normal"]
-
-        # Custom style for arrays with wrapping (optional)
-        array_style = ParagraphStyle(
-            name="ArrayStyle",
-            fontSize=8,
-            leading=10,
-            wordWrap='CJK',
-        )
 
         # Prepare header
         columns = df.columns.tolist()
@@ -456,11 +500,11 @@ def truncate_text(text, max_len=150):
 
 
 def json_to_pdf2(folder,dictionary):
+    folder="ReportData/"+folder
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
 
 
     styles = getSampleStyleSheet()
-    main_title_style = styles['Title']
     section_title_style = styles['Heading2']
 
     for section_title, json_path in dictionary.items():
@@ -468,11 +512,9 @@ def json_to_pdf2(folder,dictionary):
 
         elements = []
 
-        # Add main title on first page
-        elements.append(Paragraph(folder, main_title_style))
         elements.append(Spacer(1, 24))
 
-        elements.append(Paragraph(section_title.split("__")[0],section_title_style))
+        elements.append(Paragraph(to_cammel_case(section_title.split("__")[0]),section_title_style))
         elements.append(Spacer(1, 12))  # Add space between title and table
 
         print(section_title)
@@ -520,7 +562,6 @@ def json_to_pdf2(folder,dictionary):
 
             # Sort columns to keep them consistent
             columns = sorted(columns)
-
             # Value formatting
             def format_value(val):
                 if isinstance(val, bool):
@@ -537,6 +578,11 @@ def json_to_pdf2(folder,dictionary):
 
 
             # Create PDF
+            if (search_key(cleaned_data,"target")) and (search_key(cleaned_data,"sensitive")) and (search_key(cleaned_data,"drop")):
+                os.makedirs("ReportData/FeatureSelection", exist_ok=True)  # Ensure output folder exists
+                pdf_filename="ReportData/FeatureSelection/"+section_title+".pdf"
+                global extra_feature_selection
+                extra_feature_selection=True
             doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
 
             # Create and style the table
@@ -583,7 +629,6 @@ def histogram_json_to_pdf(folder, pdf_name, json_path):
     doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
     elements = []
     styles = getSampleStyleSheet()
-    elements.append(Paragraph(pdf_name.split("__")[0], styles['Title']))
     elements.append(Spacer(1, 24))
 
     with TemporaryDirectory() as tmpdir:
@@ -647,7 +692,7 @@ def histogram_json_to_pdf(folder, pdf_name, json_path):
                 ]))
 
                 elements.append(KeepTogether([
-                    Paragraph(metric_name.split("__")[0], styles['Heading2']),
+                    Paragraph(to_cammel_case(metric_name.split("__")[0]), styles['Heading2']),
                     Spacer(1, 12),
                     table
                 ]))
@@ -667,7 +712,6 @@ def correlation_json_to_pdf(folder, name, path):
     doc = SimpleDocTemplate(os.path.join(folder, f"{name}.pdf"), pagesize=letter)
     elements = []
 
-    elements.append(Paragraph(name.split("__")[0].replace("_", " "), styles['Title']))
     elements.append(Spacer(1, 24))
 
     max_cols=6
@@ -712,7 +756,8 @@ def correlation_json_to_pdf(folder, name, path):
                 ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
             ]))
 
-            elements.append(Paragraph(header.split("__")[0], styles['Heading2']))
+            left_heading2 = ParagraphStyle('LeftHeading2', parent=styles['Heading2'], alignment=TA_LEFT)
+            elements.append(Paragraph(to_cammel_case(header.split("__")[0]), left_heading2))
             elements.append(Spacer(1, 12))
             elements.append(table)
             elements.append(Spacer(1, 24))
@@ -751,7 +796,8 @@ def preprocessing_json_to_pdf(folder, name, path):
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
 
-    elements.append(Paragraph(name.split("__")[0], styles['Title']))
+    left_heading2  = ParagraphStyle('LeftHeading2', parent=styles['Heading2'], alignment=TA_LEFT)
+    elements.append(Paragraph(to_cammel_case(name.split("__")[0]), left_heading2))
     elements.append(Spacer(1, 12))
     elements.append(table)
     elements.append(Spacer(1, 24))
@@ -759,7 +805,7 @@ def preprocessing_json_to_pdf(folder, name, path):
     doc.build(elements)
     print(f"PDF saved to: {os.path.join(folder, f'{name}.pdf')}")
 
-def CreateReport(title,dictionary):
+def CreateReportData(title,dictionary):
     try:
         json_to_pdf2(title,dictionary)
     except:
@@ -770,13 +816,30 @@ def CreateReport(title,dictionary):
                 GraphCreator(title,dictionary)
             except:
                 print("error")
-    PDFCreator2(title, "Report.pdf")
 
 
-CreateReport("DatasetConfirmation",get_custom_packets("Packets/DatasetConfirmation"))
-CreateReport("FeatureSelection",get_custom_packets("Packets/FeatureSelection"))
-CreateReport("Proxies",get_custom_packets("Packets/Proxies"))
-CreateReport("Detection",get_custom_packets("Packets/Detection"))
-CreateReport("DataMitigation",get_custom_packets("Packets/DataMitigation"))
-CreateReport("DataMitigationSummary",get_custom_packets("Packets/DataMitigationSummary"))
+CreateReportData("DatasetConfirmation",get_custom_packets("Packets/DatasetConfirmation"))
+CreateReportData("FeatureSelection",get_custom_packets("Packets/FeatureSelection"))
+CreateReportData("Proxies",get_custom_packets("Packets/Proxies"))
+CreateReportData("Detection",get_custom_packets("Packets/Detection"))
+CreateReportData("DataMitigation",get_custom_packets("Packets/DataMitigation"))
+CreateReportData("DataMitigationSummary",get_custom_packets("Packets/DataMitigationSummary"))
+
+
+def CreateReport(folder):
+    if os.path.isdir(folder):
+        folders = [
+            f for f in os.listdir(folder)
+            if os.path.isdir(os.path.join(folder, f))
+        ]
+
+        # Sort by creation time
+        folders.sort(key=lambda f: os.path.getctime(os.path.join(folder, f)))
+
+        for dir in folders:
+            PDFCreator2(dir,"Report.pdf")
+    else:
+        print("ReportData does not exist")
+
+CreateReport("ReportData")
 
