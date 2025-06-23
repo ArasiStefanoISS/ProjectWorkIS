@@ -1,6 +1,6 @@
 import pandas as pd
 
-df = pd.read_csv('../Dataset_2.csv', encoding='ISO-8859-1')
+df = pd.read_csv('./Dataset_2.csv', encoding='ISO-8859-1')
 
 
 #Expected RAL elaboration

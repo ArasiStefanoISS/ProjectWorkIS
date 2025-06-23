@@ -4,8 +4,8 @@ import io
 from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader, PdfWriter
 from io import BytesIO
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Preformatted, Image
+from reportlab.lib.pagesizes import letter, landscape, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Preformatted, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
 from reportlab.lib import colors
 import pandas as pd
@@ -14,6 +14,8 @@ import ast
 from collections import Counter
 import json
 import matplotlib.pyplot as plt
+from tempfile import TemporaryDirectory
+import re
 
 
 
@@ -100,22 +102,6 @@ def GraphCreator(output_folder,dictionary):
             convert_svg_to_png(svg_output, png_output)
 
 
-
-def PDFCreator(image_folder, output_pdf):
-    c = canvas.Canvas(output_pdf, pagesize=letter)
-    width, height = letter
-
-    images = [f for f in os.listdir(image_folder) if f.lower().endswith(".png")]
-    images.sort()
-    for img_file in images:
-        img_path = os.path.join(image_folder, img_file)
-        c.drawImage(img_path, 0, 0, width=width, height=height, preserveAspectRatio=True, anchor='c')
-        c.showPage()
-
-    c.save()
-    print(f"PDF created at {output_pdf}")
-
-
 def PDFCreator2(folder, output_pdf):
     # Temporary in-memory PDF to hold new pages
     packet = BytesIO()
@@ -135,7 +121,7 @@ def PDFCreator2(folder, output_pdf):
             img_path = os.path.join(folder, img_file)
 
             # Draw a title based on the file name (without extension)
-            title = os.path.splitext(img_file)[0].replace('_', ' ').title()
+            title = os.path.splitext(img_file)[0].split("__")[0].replace("_", " ").title()
             c.setFont("Helvetica-Bold", 16)
             c.drawCentredString(width / 2,height - 50, title)#height - 50,
 
@@ -254,7 +240,7 @@ def csv_to_pdf_table(folder, dictionary):
 
                 # Titles
                 folder_title = os.path.basename(folder).title()
-                file_title = os.path.splitext(base_name)[0].replace("_", " ").title()
+                file_title = os.path.splitext(base_name)[0].split("__")[0].replace("_", " ").title()
                 title_para = Paragraph(folder_title, title_style)
                 subtitle_para = Paragraph(file_title, subtitle_style)
 
@@ -301,10 +287,8 @@ def bad_csv_to_pdf(folder,dictionary):
 
     for output_pdf, csv_file in dictionary.items():
 
-        table_para_title = Paragraph(output_pdf, subtitle_style)
+        table_para_title = Paragraph(output_pdf.split("__")[0], subtitle_style)
         elements.append(table_para_title)
-
-        output_pdf += ".pdf"
 
         count=0
         col=[]
@@ -350,7 +334,8 @@ def bad_csv_to_pdf(folder,dictionary):
         df=pd.DataFrame(rows,columns=col)
 
         # Prepare PDF
-        doc = SimpleDocTemplate(folder+"/table_with_histograms.pdf", pagesize=landscape(letter))
+        pdf_path = os.path.join(folder, output_pdf)
+        doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
         styles = getSampleStyleSheet()
         styleN = styles["Normal"]
 
@@ -470,56 +455,313 @@ def truncate_text(text, max_len=150):
     return text
 
 
-
-def json_to_pdf(folder,dictionary):
+def json_to_pdf2(folder,dictionary):
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
 
-    
 
     styles = getSampleStyleSheet()
     main_title_style = styles['Title']
     section_title_style = styles['Heading2']
-    code_style = styles['Code']
-
-    elements = []
-
-    # Add main title on first page
-    elements.append(Paragraph(folder, main_title_style))
-    elements.append(Spacer(1, 24))
 
     for section_title, json_path in dictionary.items():
+        pdf_filename=folder+"/"+section_title+".pdf"
 
-        # Section title
-        elements.append(Paragraph(section_title, section_title_style))
-        elements.append(Spacer(1, 12))
+        elements = []
 
-        # Load and pretty print JSON
+        # Add main title on first page
+        elements.append(Paragraph(folder, main_title_style))
+        elements.append(Spacer(1, 24))
+
+        elements.append(Paragraph(section_title.split("__")[0],section_title_style))
+        elements.append(Spacer(1, 12))  # Add space between title and table
+
+        print(section_title)
         with open(json_path, 'r') as f:
             data = json.load(f)
-        pretty_json = json.dumps(data, indent=4)
 
-        # JSON content as preformatted text
-        elements.append(Preformatted(pretty_json, code_style))
+        
 
-        # Build output path
-        output_pdf=json_path+".pdf"
-        base_name = os.path.basename(output_pdf)
-        output_path = os.path.join(folder, base_name)
+        cleaned_data = {
+            key.strip('" '): value
+            for key, value in data.items()
+        }
 
-        doc = SimpleDocTemplate(output_path, pagesize=letter,
-                            leftMargin=30, rightMargin=30,
-                            topMargin=30, bottomMargin=30)
+
+        def contains_when(data):
+            if not isinstance(data, dict):
+                return False
+            for key, val in data.items():
+                if isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict) and "when" in item:
+                            return True
+            return False
+        
+        def search_key(obj, key="suggested_proxy"):
+            if isinstance(obj, dict):
+                if key in obj:
+                    return True
+                return any(search_key(v, key) for v in obj.values())
+            elif isinstance(obj, list):
+                return any(search_key(item, key) for item in obj)
+            return False
+
+        if(contains_when(cleaned_data)):
+            histogram_json_to_pdf(folder,section_title,json_path)
+        elif(search_key(cleaned_data)):
+            correlation_json_to_pdf(folder,section_title,json_path)
+        elif(search_key(cleaned_data,"$algorithm")):
+            preprocessing_json_to_pdf(folder,section_title,json_path)
+        else:
+            # Auto-infer all unique inner keys
+            columns = set()
+            for props in cleaned_data.values():
+                columns.update(props.keys())
+
+            # Sort columns to keep them consistent
+            columns = sorted(columns)
+
+            # Value formatting
+            def format_value(val):
+                if isinstance(val, bool):
+                    return "✔" if val else "✘"
+                elif isinstance(val, float):
+                    return f"{val * 100:.0f}%"  # convert to percentage
+                return str(val)
+
+            # Build table rows
+            table_data = [["Field Name"] + columns]  # Add headers
+            for field_name, properties in cleaned_data.items():
+                row = [field_name] + [format_value(properties.get(col)) for col in columns]
+                table_data.append(row)
+
+
+            # Create PDF
+            doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+
+            # Create and style the table
+            table = Table(table_data, hAlign="LEFT")
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ]))
+
+            elements.append(table)
+            doc.build(elements)
+
+            print(f"PDF saved as: {pdf_filename}")
+
+
+def create_histogram_image(labels, values, img_path, title=None):
+    plt.figure(figsize=(2,1.5))
+    plt.bar(labels, values, color='skyblue')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    if title:
+        plt.title(title, fontsize=8)
+    plt.savefig(img_path)
+    plt.close()
+
+
+
+def sanitize_filename(text):
+    return re.sub(r'[^\w\-_.]', '_', str(text))
+
+
+def histogram_json_to_pdf(folder, pdf_name, json_path):
+    os.makedirs(folder, exist_ok=True)
+
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    pdf_path = os.path.join(folder, f"{pdf_name}.pdf")
+    doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
+    elements = []
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph(pdf_name.split("__")[0], styles['Title']))
+    elements.append(Spacer(1, 24))
+
+    with TemporaryDirectory() as tmpdir:
+        for metric_name, records in data.items():
+            if not records:
+                continue
+
+            when_keys = list(records[0].get('when', {}).keys())
+            if len(when_keys) < 2:
+                continue
+            first_attr, second_attr = when_keys[0], when_keys[1]
+
+            first_vals = sorted(set(r['when'][first_attr] for r in records if first_attr in r['when']))
+            second_vals = sorted(set(r['when'][second_attr] for r in records if second_attr in r['when']))
+
+            data_map = {col_val: {row_val: None for row_val in first_vals} for col_val in second_vals}
+
+            for rec in records:
+                w = rec['when']
+                val = rec.get('value', None)
+                if val is None:
+                    continue
+                f_val = w.get(first_attr)
+                s_val = w.get(second_attr)
+                if f_val in first_vals and s_val in second_vals:
+                    data_map[s_val][f_val] = val
+
+            # Break second_vals into chunks of max 8 columns
+            chunk_size = 6
+            for i in range(0, len(second_vals), chunk_size):
+                chunk = second_vals[i:i+chunk_size]
+
+                # Create header row for this chunk
+                header_row = [""] + chunk
+                # Create image row for this chunk
+                img_cells = []
+                for col_val in chunk:
+                    labels = []
+                    values = []
+                    for f_val in first_vals:
+                        v = data_map[col_val][f_val]
+                        if v is not None:
+                            labels.append(str(f_val))
+                            values.append(v)
+                    img_path = os.path.join(tmpdir, f"{metric_name}_{sanitize_filename(col_val)}.png")
+                    create_histogram_image(labels, values, img_path, title=col_val)
+                    img = Image(img_path, width=100, height=80)
+                    img_cells.append(img)
+
+                data_rows = [["Values"] + img_cells]
+
+                table_data = [header_row] + data_rows
+
+                col_widths = [100] + [110] * len(chunk)
+                table = Table(table_data, colWidths=col_widths)
+                table.setStyle(TableStyle([
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('ALIGN', (1,1), (-1,-1), 'CENTER'),
+                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ]))
+
+                elements.append(KeepTogether([
+                    Paragraph(metric_name.split("__")[0], styles['Heading2']),
+                    Spacer(1, 12),
+                    table
+                ]))
+                elements.append(Spacer(1, 24))
 
         doc.build(elements)
-    print(f"PDF created at {output_pdf}")
+        print(f"PDF created at: {pdf_path}")
 
 
+def correlation_json_to_pdf(folder, name, path):
+    os.makedirs(folder, exist_ok=True)
 
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
 
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(os.path.join(folder, f"{name}.pdf"), pagesize=letter)
+    elements = []
+
+    elements.append(Paragraph(name.split("__")[0].replace("_", " "), styles['Title']))
+    elements.append(Spacer(1, 24))
+
+    max_cols=6
+
+    for main_attr, nested_dict in data.items():
+        header = main_attr.strip('\" ')
+
+        columns = list(nested_dict.keys())
+        clean_columns = [col.strip('\" ') for col in columns]
+
+        # Get row labels from first nested dict value
+        example_values = nested_dict[columns[0]]
+        row_labels = list(example_values.keys())
+
+        # Split columns in chunks of max_cols
+        for i in range(0, len(columns), max_cols):
+            chunk_cols = columns[i:i+max_cols]
+            chunk_clean_cols = clean_columns[i:i+max_cols]
+
+            table_data = [["", *chunk_clean_cols]]
+
+            for row_label in row_labels:
+                row = [row_label]
+                for col in chunk_cols:
+                    val = nested_dict[col].get(row_label)
+                    if isinstance(val, float):
+                        val_str = f"{val * 100:.2f}%"
+                    elif isinstance(val, bool):
+                        val_str = "✓" if val else "✗"
+                    else:
+                        val_str = str(val)
+                    row.append(val_str)
+                table_data.append(row)
+
+            table = Table(table_data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (1,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('ALIGN', (1,1), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+            ]))
+
+            elements.append(Paragraph(header.split("__")[0], styles['Heading2']))
+            elements.append(Spacer(1, 12))
+            elements.append(table)
+            elements.append(Spacer(1, 24))
+
+    doc.build(elements)
+    print(f"PDF saved to {doc.filename}")
+
+def preprocessing_json_to_pdf(folder, name, path):
+    os.makedirs(folder, exist_ok=True)
+
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(os.path.join(folder, f"{name}.pdf"), pagesize=letter)
+    elements = []
+
+    # Prepare header (keys) and one row of values
+    headers = list(data.keys())
+    values = []
+    for val in data.values():
+        if isinstance(val, float):
+            values.append(f"{val * 100:.2f}%")  # Format float as percentage
+        else:
+            values.append(str(val))
+
+    # Build table data: one row for headers, one for values
+    table_data = [headers, values]
+
+    table = Table(table_data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+
+    elements.append(Paragraph(name.split("__")[0], styles['Title']))
+    elements.append(Spacer(1, 12))
+    elements.append(table)
+    elements.append(Spacer(1, 24))
+
+    doc.build(elements)
+    print(f"PDF saved to: {os.path.join(folder, f'{name}.pdf')}")
 
 def CreateReport(title,dictionary):
     try:
-        json_to_pdf(title,dictionary)
+        json_to_pdf2(title,dictionary)
     except:
         try:
             csv_to_pdf_table(title,dictionary)
@@ -531,9 +773,10 @@ def CreateReport(title,dictionary):
     PDFCreator2(title, "Report.pdf")
 
 
-CreateReport("DataMitigationSummary",get_custom_packets("Packets/DataMitigationSummary"))
 CreateReport("DatasetConfirmation",get_custom_packets("Packets/DatasetConfirmation"))
+CreateReport("FeatureSelection",get_custom_packets("Packets/FeatureSelection"))
 CreateReport("Proxies",get_custom_packets("Packets/Proxies"))
 CreateReport("Detection",get_custom_packets("Packets/Detection"))
 CreateReport("DataMitigation",get_custom_packets("Packets/DataMitigation"))
-CreateReport("FeatureSelection",get_custom_packets("Packets/FeatureSelection"))
+CreateReport("DataMitigationSummary",get_custom_packets("Packets/DataMitigationSummary"))
+
