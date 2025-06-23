@@ -63,14 +63,6 @@ def is_bad_csv(file_path):
         return False
     if isHeader==True and isBad==False:
         return True
-
-def is_image(file_path):
-    from PIL import Image
-    try:
-        with Image.open(file_path) as img:
-            return True
-    except Exception:
-        return False
     
 def is_json_file(filepath):
     try:
@@ -90,23 +82,15 @@ def convert_svg_to_png(svg_path, png_path):
     ], check=True)
 
 
-def GraphCreator(output_folder,dictionary):
+def GraphCreator(output_folder,key,file_path):
     output_folder="ReportData/"+output_folder
     os.makedirs(output_folder, exist_ok=True)
 
-    for key, file_path in dictionary.items():
-        if is_json_file(file_path)==False:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    svg_string = f.read()
-                print(f"File '{file_path}' (key: {key}) read as text successfully.")
-            except UnicodeDecodeError:
-                print(f"File '{file_path}' (key: {key}) is not plain UTF-8 text.")
-                continue
-            except Exception as e:
-                print(f"Error reading file '{file_path}' (key: {key}): {e}")
-                continue
-
+    if is_json_file(file_path)==False:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                svg_string = f.read()
+            print(f"File '{file_path}' (key: {key}) read as text successfully.")
             svg_output = os.path.join(output_folder, f"{key}.svg")
             png_output = os.path.join(output_folder, f"{key}.png")
 
@@ -114,6 +98,12 @@ def GraphCreator(output_folder,dictionary):
                 f.write(svg_string)
 
             convert_svg_to_png(svg_output, png_output)
+        except UnicodeDecodeError:
+            print(f"File '{file_path}' (key: {key}) is not plain UTF-8 text.")
+        except Exception as e:
+            print(f"Error reading file '{file_path}' (key: {key}): {e}")
+
+        
 
 
 def add_title_overlay(page, title_text):
@@ -157,8 +147,6 @@ def PDFCreator2(folder, output_pdf):
     # Sort images (you can add your logic to define sections here)
     images = [f for f in os.listdir(folder) if f.lower().endswith(".png")]
     images.sort()
-
-    
 
     if images:
         if first==True:
@@ -255,7 +243,7 @@ def PDFCreator2(folder, output_pdf):
 
 
 
-def csv_to_pdf_table(folder, dictionary):
+def csv_to_pdf_table(folder, output_pdf, csv_file):
     folder="ReportData/"+folder
     styles = getSampleStyleSheet()
     styleN = styles["BodyText"]
@@ -267,62 +255,61 @@ def csv_to_pdf_table(folder, dictionary):
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
 
 
-    for output_pdf, csv_file in dictionary.items():
-        if is_json_file(csv_file)==False:
-            output_pdf += ".pdf"
-            try:
-                df = pd.read_csv(csv_file)
+    if is_json_file(csv_file)==False:
+        output_pdf += ".pdf"
+        try:
+            df = pd.read_csv(csv_file)
 
-                # Prepare table data with wrapped cells
-                data = [[Paragraph(str(cell), styleN) for cell in row] for row in [df.columns.tolist()] + df.values.tolist()]
+            # Prepare table data with wrapped cells
+            data = [[Paragraph(str(cell), styleN) for cell in row] for row in [df.columns.tolist()] + df.values.tolist()]
 
-                # Column widths
-                page_width, _ = landscape(letter)
-                usable_width = page_width - 60  # left + right margin (30 each)
-                num_columns = len(df.columns)
-                col_widths = [usable_width / num_columns] * num_columns
+            # Column widths
+            page_width, _ = landscape(letter)
+            usable_width = page_width - 60  # left + right margin (30 each)
+            num_columns = len(df.columns)
+            col_widths = [usable_width / num_columns] * num_columns
 
-                # Create table
-                table = Table(data, colWidths=col_widths)
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('GRID', (0, 0), (-1, -1), 0.25, colors.black),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                    ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ]))
+            # Create table
+            table = Table(data, colWidths=col_widths)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.25, colors.black),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ]))
 
-                # Build output path
-                base_name = os.path.basename(output_pdf)
-                output_path = os.path.join(folder, base_name)
+            # Build output path
+            base_name = os.path.basename(output_pdf)
+            output_path = os.path.join(folder, base_name)
 
-                # Title
-                file_title = os.path.splitext(base_name)[0].split("__")[0].replace("_", " ")
-                subtitle_para = Paragraph(to_cammel_case(file_title), subtitle_style)
+            # Title
+            file_title = os.path.splitext(base_name)[0].split("__")[0].replace("_", " ")
+            subtitle_para = Paragraph(to_cammel_case(file_title), subtitle_style)
 
-                # Assemble PDF content
-                elements = [ Spacer(1, 6), subtitle_para, Spacer(1, 12), table]
+            # Assemble PDF content
+            elements = [ Spacer(1, 6), subtitle_para, Spacer(1, 12), table]
 
-                # Build PDF
-                doc = SimpleDocTemplate(
-                    output_path,
-                    pagesize=landscape(letter),
-                    leftMargin=30, rightMargin=30,
-                    topMargin=30, bottomMargin=30
-                )
-                doc.build(elements)
+            # Build PDF
+            doc = SimpleDocTemplate(
+                output_path,
+                pagesize=landscape(letter),
+                leftMargin=30, rightMargin=30,
+                topMargin=30, bottomMargin=30
+            )
+            doc.build(elements)
 
-                print(f"Created PDF: {output_path}")
-            except Exception as badFile:
-                print(f"Failed to process {csv_file}: {badFile}")
-                if is_bad_csv(csv_file):
-                    bad_csv_to_pdf(folder, {output_pdf: csv_file})
+            print(f"Created PDF: {output_path}")
+        except Exception as badFile:
+            print(f"Failed to process {csv_file}: {badFile}")
+            if is_bad_csv(csv_file):
+                bad_csv_to_pdf(folder, output_pdf, csv_file)
 
 
-def bad_csv_to_pdf(folder,dictionary):
+def bad_csv_to_pdf(folder,output_pdf,csv_file ):
     styles = getSampleStyleSheet()
     styleN = styles["BodyText"]
     styleN.fontSize = 7
@@ -336,160 +323,156 @@ def bad_csv_to_pdf(folder,dictionary):
 
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
 
+    table_para_title = Paragraph(to_cammel_case(output_pdf.split("__")[0]), subtitle_style)
+    elements.append(table_para_title)
 
-    for output_pdf, csv_file in dictionary.items():
-
-        table_para_title = Paragraph(to_cammel_case(output_pdf.split("__")[0]), subtitle_style)
-        elements.append(table_para_title)
-
-        count=0
-        col=[]
-        rows=[]
-        with open(csv_file, "r") as f:
-            for line in f:
-                count+=1
-                parts=line.strip().split(",")
-                isArray=False
-                isJson=False
-                array=[]
-                json_string=""
-                if count==1:
-                    col = parts
-                else:
-                    fixed_line=[]
-                    for word in parts:
-                        if ("{" in word or isJson) and not isArray:
-                            isJson=True
-                            if "}" in word:
-                                json_string+=word
-                                isJson=False
-                                json_string_fixed=json_string.replace("'","")
-                                fixed_line.append(json.loads(json_string_fixed))
-                                json_string=""
-                            else:
-                                json_string+=word+", "
-                        elif ("[" in word or isArray) and not isJson:
-                            isArray=True
-                            if "]" in word:
-                                array.append(word.replace("]", ""))
-                                isArray=False
-                                fixed_line.append(array)
-                                array=[]
-                            else:
-                                array.append(word.replace("[", ""))
-                        else:
-                            fixed_line.append(word)
-
-                    rows.append(fixed_line)
-
-
-        df=pd.DataFrame(rows,columns=col)
-
-        # Prepare PDF
-        pdf_path = os.path.join(folder, output_pdf)
-        doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
-        styles = getSampleStyleSheet()
-        styleN = styles["Normal"]
-
-        # Prepare header
-        columns = df.columns.tolist()
-        table_data = [columns]
-
-        # Constants for image size
-        MAX_IMAGE_WIDTH = 100
-        MAX_IMAGE_HEIGHT = 70
-
-        # Build each row dynamically
-        for _, row in df.iterrows():
-            row_cells = []
-
-            for col in df.columns:
-                value = row[col]
-
-                # Handle array/list: convert to string and truncate
-                if isinstance(value, list):
-                    value_str = ", ".join(map(str, value))
-                    value_str = truncate_text(value_str)
-                    row_cells.append(Paragraph(value_str, styleN))
-
-                # Handle JSON histogram
-                elif isinstance(value, (dict, str)) and (
-                    (isinstance(value, str) and value.strip().startswith("{") and "keys" in value)
-                    or isinstance(value, dict)
-                ):
-                    try:
-                        hist_data = json.loads(value) if isinstance(value, str) else value
-                        fig, ax = plt.subplots(figsize=(2, 1.2))
-                        ax.bar(hist_data['keys'], hist_data['values'])
-
-                        # Hide x-axis tick labels and ticks, but keep the spine (line)
-                        ax.set_xticks([])             # Remove tick marks
-                        ax.set_xticklabels([])        # Remove tick labels
-                        # Note: Do NOT hide the spine to keep the bottom line
-
-                        plt.tight_layout()
-
-                        img_buffer = io.BytesIO()
-                        plt.savefig(img_buffer, format='PNG')
-                        plt.close(fig)
-                        img_buffer.seek(0)
-
-                        img = Image(img_buffer, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)  # image size fixed here
-                        row_cells.append(img)
-                    except Exception:
-                        row_cells.append(Paragraph("Invalid Histogram", styleN))
-
-                # Handle long strings: truncate if needed
-                elif isinstance(value, str):
-                    value_str = truncate_text(value)
-                    row_cells.append(Paragraph(value_str, styleN))
-
-                # Other types: just convert and truncate if too long
-                else:
-                    value_str = truncate_text(value)
-                    row_cells.append(Paragraph(value_str, styleN))
-
-            table_data.append(row_cells)
-
-
-        MAX_WIDTH = 150  # max width for text columns
-        usable_width = landscape(letter)[0] - 60  # 30 margin on each side
-
-
-        
-        col_widths = []
-        for col_name in df.columns:
-            # Arrays get fixed width 80
-            if df[col_name].apply(lambda x: isinstance(x, list)).any():
-                col_widths.append(80)
-
-            # Histograms (dict or JSON string) get double width
-            elif df[col_name].apply(lambda x: (
-                isinstance(x, dict) or 
-                (isinstance(x, str) and x.strip().startswith("{") and "keys" in x)
-            )).any():
-                col_widths.append(1.2 * MAX_IMAGE_WIDTH)
-
+    count=0
+    col=[]
+    rows=[]
+    with open(csv_file, "r") as f:
+        for line in f:
+            count+=1
+            parts=line.strip().split(",")
+            isArray=False
+            isJson=False
+            array=[]
+            json_string=""
+            if count==1:
+                col = parts
             else:
-                # Distribute remaining width evenly but max MAX_WIDTH
-                col_widths.append(min(usable_width / len(df.columns), MAX_WIDTH))
+                fixed_line=[]
+                for word in parts:
+                    if ("{" in word or isJson) and not isArray:
+                        isJson=True
+                        if "}" in word:
+                            json_string+=word
+                            isJson=False
+                            json_string_fixed=json_string.replace("'","")
+                            fixed_line.append(json.loads(json_string_fixed))
+                            json_string=""
+                        else:
+                            json_string+=word+", "
+                    elif ("[" in word or isArray) and not isJson:
+                        isArray=True
+                        if "]" in word:
+                            array.append(word.replace("]", ""))
+                            isArray=False
+                            fixed_line.append(array)
+                            array=[]
+                        else:
+                            array.append(word.replace("[", ""))
+                    else:
+                        fixed_line.append(word)
 
-        # Create and style table
-        table = Table(table_data, colWidths=col_widths, repeatRows=1)
-        table._argW = col_widths  # reinforce widths for layout
-        table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 6),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ]))
+                rows.append(fixed_line)
 
-        #elements.append(table_data)
-        elements.append(table)
 
-        # Build PDF
-        doc.build(elements)
+    df=pd.DataFrame(rows,columns=col)
+
+    # Prepare PDF
+    pdf_path = os.path.join(folder, output_pdf)
+    doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    styleN = styles["Normal"]
+
+    # Prepare header
+    columns = df.columns.tolist()
+    table_data = [columns]
+
+    # Constants for image size
+    MAX_IMAGE_WIDTH = 100
+    MAX_IMAGE_HEIGHT = 70
+
+    # Build each row dynamically
+    for _, row in df.iterrows():
+        row_cells = []
+
+        for col in df.columns:
+            value = row[col]
+
+            # Handle array/list: convert to string and truncate
+            if isinstance(value, list):
+                value_str = ", ".join(map(str, value))
+                value_str = truncate_text(value_str)
+                row_cells.append(Paragraph(value_str, styleN))
+
+            # Handle JSON histogram
+            elif isinstance(value, (dict, str)) and (
+                (isinstance(value, str) and value.strip().startswith("{") and "keys" in value)
+                or isinstance(value, dict)
+            ):
+                try:
+                    hist_data = json.loads(value) if isinstance(value, str) else value
+                    fig, ax = plt.subplots(figsize=(2, 1.2))
+                    ax.bar(hist_data['keys'], hist_data['values'])
+
+                    # Hide x-axis tick labels and ticks, but keep the spine (line)
+                    ax.set_xticks([])             # Remove tick marks
+                    ax.set_xticklabels([])        # Remove tick labels
+                    # Note: Do NOT hide the spine to keep the bottom line
+
+                    plt.tight_layout()
+
+                    img_buffer = io.BytesIO()
+                    plt.savefig(img_buffer, format='PNG')
+                    plt.close(fig)
+                    img_buffer.seek(0)
+
+                    img = Image(img_buffer, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)  # image size fixed here
+                    row_cells.append(img)
+                except Exception:
+                    row_cells.append(Paragraph("Invalid Histogram", styleN))
+
+            # Handle long strings: truncate if needed
+            elif isinstance(value, str):
+                value_str = truncate_text(value)
+                row_cells.append(Paragraph(value_str, styleN))
+
+            # Other types: just convert and truncate if too long
+            else:
+                value_str = truncate_text(value)
+                row_cells.append(Paragraph(value_str, styleN))
+
+        table_data.append(row_cells)
+
+
+    MAX_WIDTH = 150  # max width for text columns
+    usable_width = landscape(letter)[0] - 60  # 30 margin on each side
+
+
+    
+    col_widths = []
+    for col_name in df.columns:
+        # Arrays get fixed width 80
+        if df[col_name].apply(lambda x: isinstance(x, list)).any():
+            col_widths.append(80)
+
+        # Histograms (dict or JSON string) get double width
+        elif df[col_name].apply(lambda x: (
+            isinstance(x, dict) or 
+            (isinstance(x, str) and x.strip().startswith("{") and "keys" in x)
+        )).any():
+            col_widths.append(1.2 * MAX_IMAGE_WIDTH)
+
+        else:
+            # Distribute remaining width evenly but max MAX_WIDTH
+            col_widths.append(min(usable_width / len(df.columns), MAX_WIDTH))
+
+    # Create and style table
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    table._argW = col_widths  # reinforce widths for layout
+    table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+    ]))
+
+    elements.append(table)
+
+    # Build PDF
+    doc.build(elements)
 
 
 def truncate_text(text, max_len=150):
@@ -499,108 +482,106 @@ def truncate_text(text, max_len=150):
     return text
 
 
-def json_to_pdf2(folder,dictionary):
+def json_to_pdf2(folder,section_title,json_path):
     folder="ReportData/"+folder
     os.makedirs(folder, exist_ok=True)  # Ensure output folder exists
-
 
     styles = getSampleStyleSheet()
     section_title_style = styles['Heading2']
 
-    for section_title, json_path in dictionary.items():
-        pdf_filename=folder+"/"+section_title+".pdf"
+    pdf_filename=folder+"/"+section_title+".pdf"
 
-        elements = []
+    elements = []
 
-        elements.append(Spacer(1, 24))
+    elements.append(Spacer(1, 24))
 
-        elements.append(Paragraph(to_cammel_case(section_title.split("__")[0]),section_title_style))
-        elements.append(Spacer(1, 12))  # Add space between title and table
+    elements.append(Paragraph(to_cammel_case(section_title.split("__")[0]),section_title_style))
+    elements.append(Spacer(1, 12))  # Add space between title and table
 
-        print(section_title)
-        with open(json_path, 'r') as f:
-            data = json.load(f)
+    print(section_title)
+    with open(json_path, 'r') as f:
+        data = json.load(f)
 
-        
+    
 
-        cleaned_data = {
-            key.strip('" '): value
-            for key, value in data.items()
-        }
+    cleaned_data = {
+        key.strip('" '): value
+        for key, value in data.items()
+    }
 
 
-        def contains_when(data):
-            if not isinstance(data, dict):
-                return False
-            for key, val in data.items():
-                if isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, dict) and "when" in item:
-                            return True
+    def contains_when(data):
+        if not isinstance(data, dict):
             return False
+        for key, val in data.items():
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict) and "when" in item:
+                        return True
+        return False
+    
+    def search_key(obj, key="suggested_proxy"):
+        if isinstance(obj, dict):
+            if key in obj:
+                return True
+            return any(search_key(v, key) for v in obj.values())
+        elif isinstance(obj, list):
+            return any(search_key(item, key) for item in obj)
+        return False
+    
+    if(contains_when(cleaned_data)):
+        histogram_json_to_pdf(folder,section_title,json_path)
+    elif(search_key(cleaned_data)):
+        suggested_json_to_pdf(folder,section_title,json_path)
+    elif(search_key(cleaned_data,"$algorithm")):
+        preprocessing_json_to_pdf(folder,section_title,json_path)
+    else:
+        # Auto-infer all unique inner keys
+        columns = set()
+        for props in cleaned_data.values():
+            columns.update(props.keys())
         
-        def search_key(obj, key="suggested_proxy"):
-            if isinstance(obj, dict):
-                if key in obj:
-                    return True
-                return any(search_key(v, key) for v in obj.values())
-            elif isinstance(obj, list):
-                return any(search_key(item, key) for item in obj)
-            return False
+        # Sort columns to keep them consistent
+        columns = sorted(columns)
+        # Value formatting
+        def format_value(val):
+            if isinstance(val, bool):
+                return "✔" if val else "✘"
+            elif isinstance(val, float):
+                return f"{val * 100:.0f}%"  # convert to percentage
+            return str(val)
 
-        if(contains_when(cleaned_data)):
-            histogram_json_to_pdf(folder,section_title,json_path)
-        elif(search_key(cleaned_data)):
-            correlation_json_to_pdf(folder,section_title,json_path)
-        elif(search_key(cleaned_data,"$algorithm")):
-            preprocessing_json_to_pdf(folder,section_title,json_path)
-        else:
-            # Auto-infer all unique inner keys
-            columns = set()
-            for props in cleaned_data.values():
-                columns.update(props.keys())
-
-            # Sort columns to keep them consistent
-            columns = sorted(columns)
-            # Value formatting
-            def format_value(val):
-                if isinstance(val, bool):
-                    return "✔" if val else "✘"
-                elif isinstance(val, float):
-                    return f"{val * 100:.0f}%"  # convert to percentage
-                return str(val)
-
-            # Build table rows
-            table_data = [["Field Name"] + columns]  # Add headers
-            for field_name, properties in cleaned_data.items():
-                row = [field_name] + [format_value(properties.get(col)) for col in columns]
-                table_data.append(row)
+        # Build table rows
+        table_data = [["Field Name"] + columns]  # Add headers
+        for field_name, properties in cleaned_data.items():
+            row = [field_name] + [format_value(properties.get(col)) for col in columns]
+            table_data.append(row)
 
 
-            # Create PDF
-            if (search_key(cleaned_data,"target")) and (search_key(cleaned_data,"sensitive")) and (search_key(cleaned_data,"drop")):
-                os.makedirs("ReportData/FeatureSelection", exist_ok=True)  # Ensure output folder exists
-                pdf_filename="ReportData/FeatureSelection/"+section_title+".pdf"
-                global extra_feature_selection
-                extra_feature_selection=True
-            doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+        # Create PDF
+        if (search_key(cleaned_data,"target")) and (search_key(cleaned_data,"sensitive")) and (search_key(cleaned_data,"drop")):
+            os.makedirs("ReportData/FeatureSelection", exist_ok=True)  # Ensure output folder exists
+            pdf_filename="ReportData/FeatureSelection/"+section_title+".pdf"
+            global extra_feature_selection
+            extra_feature_selection=True
+        doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
 
-            # Create and style the table
-            table = Table(table_data, hAlign="LEFT")
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
-                ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-            ]))
+        # Create and style the table
+        table = Table(table_data, hAlign="LEFT")
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ]))
 
-            elements.append(table)
-            doc.build(elements)
+        elements.append(table)
+        doc.build(elements)
 
-            print(f"PDF saved as: {pdf_filename}")
+        print(f"PDF saved as: {pdf_filename}")
 
 
 def create_histogram_image(labels, values, img_path, title=None):
@@ -629,6 +610,10 @@ def histogram_json_to_pdf(folder, pdf_name, json_path):
     doc = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))
     elements = []
     styles = getSampleStyleSheet()
+
+    left_heading2 = ParagraphStyle('LeftHeading2', parent=styles['Heading2'], alignment=TA_LEFT)
+    elements.append(Paragraph(to_cammel_case(pdf_name.split("__")[0].replace("_"," ")), left_heading2))
+
     elements.append(Spacer(1, 24))
 
     with TemporaryDirectory() as tmpdir:
@@ -702,9 +687,9 @@ def histogram_json_to_pdf(folder, pdf_name, json_path):
         print(f"PDF created at: {pdf_path}")
 
 
-def correlation_json_to_pdf(folder, name, path):
+def suggested_json_to_pdf(folder, name, path):
     os.makedirs(folder, exist_ok=True)
-
+    
     with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -712,9 +697,14 @@ def correlation_json_to_pdf(folder, name, path):
     doc = SimpleDocTemplate(os.path.join(folder, f"{name}.pdf"), pagesize=letter)
     elements = []
 
+    left_heading2 = ParagraphStyle('LeftHeading2', parent=styles['Heading2'], alignment=TA_LEFT)
+    elements.append(Paragraph(to_cammel_case(name.split("__")[0].replace("_"," ")), left_heading2))
+
     elements.append(Spacer(1, 24))
 
     max_cols=6
+
+    
 
     for main_attr, nested_dict in data.items():
         header = main_attr.strip('\" ')
@@ -756,7 +746,6 @@ def correlation_json_to_pdf(folder, name, path):
                 ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
             ]))
 
-            left_heading2 = ParagraphStyle('LeftHeading2', parent=styles['Heading2'], alignment=TA_LEFT)
             elements.append(Paragraph(to_cammel_case(header.split("__")[0]), left_heading2))
             elements.append(Spacer(1, 12))
             elements.append(table)
@@ -806,16 +795,17 @@ def preprocessing_json_to_pdf(folder, name, path):
     print(f"PDF saved to: {os.path.join(folder, f'{name}.pdf')}")
 
 def CreateReportData(title,dictionary):
-    try:
-        json_to_pdf2(title,dictionary)
-    except:
+    for name,value in dictionary.items():
         try:
-            csv_to_pdf_table(title,dictionary)
+            json_to_pdf2(title,name,value)
         except:
             try:
-                GraphCreator(title,dictionary)
+                csv_to_pdf_table(title,name,value)
             except:
-                print("error")
+                try:
+                    GraphCreator(title,name,value)
+                except:
+                    print("error")
 
 
 CreateReportData("DatasetConfirmation",get_custom_packets("Packets/DatasetConfirmation"))
